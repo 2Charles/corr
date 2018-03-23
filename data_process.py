@@ -152,18 +152,14 @@ class corrAna(object):
         else:
             self.symbolDict[level][date] = symbolLst
 
-    def sampledata(self, data, period, target,split = 2):
-        sample = sample_lib.sample(period = period, target = target, split = split)
-        return sample.sample_multidays(data, target)
-
     def shift_align(self, data, target, lag, align_base):
         '''first shift data of target colume at lag and then align it to origin dataframe'''
         df = data.copy()
-        temp = pd.DataFrame(df[target].shift(periods=-int(lag[:-1]), freq = lag[-1]))
-        temp = self.align_drop(data=temp, base = align_base)
+        temp = pd.DataFrame(df[target].shift(periods=-int(lag[:-1]), freq=lag[-1]))
+        temp = self.align_drop(data=temp, base=align_base)
         df[target] = temp
-        df.fillna(method = 'ffill', inplace=True)
-        df.fillna(method = 'bfill', inplace=True)
+        df.fillna(method='ffill', inplace=True)
+        df.fillna(method='bfill', inplace=True)
         return df
 
     def get_align_base(self, df): 
@@ -213,7 +209,7 @@ class corrAna(object):
             df.loc[:, 'mid_price'] = mid_price
             df.mid_price.replace(0,method='ffill', inplace=True)
 
-    def rollingRet(self, df):
+    def rollingRet(self, df, period):
         res = [0]
         for i in range(1, df.shape[0]):
             if df.mid_price.values[i - 1] == 0:

@@ -14,13 +14,19 @@ class pre_process(object):
     0 for rolling, 1 for aggravated;
     level : 0 for major option, 1 for secondary, 2 for third '''
 
-    def __init__(self, filedir, type, split = 2):
+    def __init__(self, filedir, type, split=2, save=True, out_dir='/media/charles/charles_13162398828/hdd/output/'):
         self.filedir = filedir
         self.type = type
         self.symbolDict = {}
         self.split = split
+        self.save = save
+        self.out_dir = out_dir
 
     def generateDayLst(self, start, end):
+        if isinstance(start, int):
+            start = str(start)
+        if isinstance(end, int):
+            end = str(end)
         days = pd.date_range(start=start, end=end, freq='B')
         dayLst = []
         for day in days:
@@ -29,7 +35,7 @@ class pre_process(object):
             dayLst.append(day)
         return dayLst
 
-    def loaddata(self, day):
+    def loaddata(self, day):            # 读取单日的数据，并将时间规整化
         '''only load single day
         split controls split one sec into how many parts'''
         if isinstance(day, str):
@@ -55,6 +61,73 @@ class pre_process(object):
         flag = map(lambda x: (x in timerange1) or (x in timerange2), temp.index.values)  # only keep data that belongs to time [09,11:30] and [13:30,15:00]
         temp = temp[flag]
         return temp
+
+    def load_multi_days(self, dayLst):    #读取多日数据，并存入到一个字典中，以对应日期为key
+        '''load multi days raw_data and store in a dictionary, with date as key'''
+        dic = {}
+        for day in dayLst:
+            dic[day] = self.loaddata(day)
+        return dic
+
+    def filterdata(self, df, lst, period='500ms', level=0, threshold=1000):
+        '''lst is a list of option that want to keep from raw dataframe'''
+        if self.type == 1:
+            keywd = 'aggravated_return'
+        else:
+            keywd = 'rolling_return'
+        align_base = self.get_align_base(df)
+        date = str(df.index.values[0]).split('T')[0]
+        date = (date.split('-'))[0]+(date.split('-'))[1]+(date.split('-'))[2]
+        res = pd.DataFrame()
+        for name in lst:
+            temp = df[df['ticker'] == name]
+            if temp.shape[0] < threshold:
+                continue
+            else:
+                temp = self.calcAll(temp, period=period)
+                if self.save:
+                    same_cols = ['ticker', 'bid_price', 'ask_price', 'mid_price', 'rolling_return', 'aggravated_return']
+                    to_save = temp[same_cols]
+                    to_save = self.align_drop(data=to_save, base=align_base)
+                    if not os.path.exists(self.out_dir+'/price/'+date+'/'+name[:2] + str(level)+'/'):
+                        os.makedirs(self.out_dir+'/price/'+date+'/'+name[:2] + str(level)+'/')
+                    to_save = self.align_drop(data=to_save, base=align_base)
+                    to_save.fillna(method='ffill', axis=0, inplace=True)
+                    to_save.fillna(method='bfill', axis=0, inplace=True)
+                    to_save.to_csv(self.out_dir+'/price/'+date+'/'+name[:2] + str(level)+'/period_'+period+'.csv')
+
+                temp = temp.rename(columns={keywd: name[:2]+str(level)})
+                temp = pd.DataFrame(temp.loc[:, name[:2]+str(level)])
+                temp = self.align_drop(data=temp, base=align_base)
+                res = pd.concat([res, temp], axis=1)
+        res.fillna(method='ffill', axis=0, inplace=True)
+        res.fillna(method='bfill', axis=0, inplace=True)
+        return res
+
+    def concatdata(self, data_dict, period='500ms', level=0, filterLst='major'):
+        '''load multidays and filter and concat together'''
+        dayLst = data_dict.keys()
+        if len(dayLst) == 1:
+            symbolKey = dayLst[0]
+        else:
+            symbolKey = dayLst[0]+'-'+dayLst[-1]
+        temp = data_dict[dayLst[0]]
+        if filterLst == 'major':
+            major = self.findMostInType(temp)
+            self.recordSymbol(symbolKey, major, level=level)
+            filterLst = major.values()
+        res = self.filterdata(temp, lst=filterLst, period=period, level=level)
+        del temp; gc.collect()
+        if len(dayLst) > 1:
+            for day in dayLst[1:]:
+                temp = data_dict[day]
+                major = self.findMostInType(temp)
+                filterLst = major.values()
+                self.recordSymbol(symbolKey, major, level = level)
+                res0 = self.filterdata(temp, lst=filterLst, level = level)
+                res = pd.concat([res, res0])
+                del temp, res0; gc.collect()
+        return res
 
     def timeIndex(self, df, date):
         '''trim time into 500ms or 250ms and change it into timeseries and set as index'''
@@ -99,52 +172,6 @@ class pre_process(object):
             res.append(s)
         df.index = pd.DatetimeIndex(res)
 
-    def filterdata(self, df, lst, period='500ms', level=0, threshold=1000):
-        '''lst is a list of option that want to keep from raw dataframe'''
-        if self.type == 1:
-            keywd = 'aggravated_return'
-        else:
-            keywd = 'rolling_return'
-        align_base = self.get_align_base(df)
-        res = pd.DataFrame()
-        for name in lst:
-            temp = df[df['ticker'] == name]
-            if temp.shape[0] < threshold:
-                continue
-            else:
-                temp = self.calcAll(temp, period=period)
-                temp = temp.rename(columns={keywd: name[:2]+str(level)})
-                temp = pd.DataFrame(temp.loc[:, name[:2]+str(level)])
-                temp = self.align_drop(data=temp, base=align_base)
-                res = pd.concat([res, temp], axis=1)
-        res.fillna(method='ffill', axis=0, inplace=True)
-        res.fillna(method='bfill', axis=0, inplace=True)
-        return res
-
-    def concatdata(self, dayLst, period='500ms', level=0, filterLst='major'):
-        '''load multidays and filter and concat together'''
-        if len(dayLst) == 1:
-            symbolKey = dayLst[0]
-        else:
-            symbolKey = dayLst[0]+'-'+dayLst[-1]
-        temp = self.loaddata(day=dayLst[0])
-        if filterLst == 'major':
-            major = self.findMostInType(temp)
-            self.recordSymbol(symbolKey, major, level=level)
-            filterLst = major.values()
-        res = self.filterdata(temp, lst=filterLst, period=period, level=level)
-        del temp; gc.collect()
-        if len(dayLst) > 1:
-            for day in dayLst[1:]:
-                temp = self.loaddata(day=day)
-                major = self.findMostInType(temp)
-                filterLst = major.values()
-                self.recordSymbol(symbolKey, major, level = level)
-                res0 = self.filterdata(temp, lst=filterLst, level = level)
-                res = pd.concat([res, res0])
-                del temp, res0; gc.collect()
-        return res
-
     def recordSymbol(self, date, symbolLst, level = 0): # a dictionary record ticker and symbol, first key is level and then date
         '''record symbol and ticker'''
         if level not in self.symbolDict.keys():
@@ -156,8 +183,12 @@ class pre_process(object):
     def shift_align(self, data, target, lag, align_base):
         '''first shift data of target colume at lag and then align it to origin dataframe'''
         df = data.copy()
-        temp = pd.DataFrame(df[target].shift(periods=-int(lag[:-1]), freq = lag[-1]))
-        temp = self.align_drop(data=temp, base = align_base)
+        if 'ms' in lag:
+            temp = pd.DataFrame(df[target].shift(periods=-int(lag[:-2]), freq=lag[-2:]))
+            temp = self.align_drop(data=temp, base=align_base)
+        else:
+            temp = pd.DataFrame(df[target].shift(periods=-int(lag[:-1]), freq=lag[-1]))
+            temp = self.align_drop(data=temp, base=align_base)
         df[target] = temp
         df.fillna(method = 'ffill', inplace=True)
         df.fillna(method = 'bfill', inplace=True)
@@ -258,5 +289,20 @@ class pre_process(object):
                         lst.remove(elem)
         return most
 
-# pre =pre_process(filedir='/home/charles/python/intern/data/',type = 0, split=2)
-# res = pre.concatdata(['20180201'])
+# pre =pre_process(filedir='/media/charles/charles_13162398828/hdd/ctp/day/',type = 0, split=2)
+# daylst = pre.generateDayLst(20180206, 20180319)
+# print daylst
+# data_lst = pre.load_multi_days(daylst)
+# print data_lst['20180315'].shape
+# for day in daylst:
+#     print 'processing day: ', day
+#     try:
+#         raw_data = data_lst[day]
+#         for level in [0]:  # to get self.level updated
+#             major = pre.findMostInType(raw_data, level=0)
+#             for period in ['0s', '1s', '5s']:
+#                 data = pre.filterdata(raw_data,lst= major.values(),period=period)
+#     except:
+#         print 'wrong with day: ', day
+#
+# # res = pre.concatdata(data_lst, period='5s')

@@ -23,7 +23,10 @@ class sample(object):
             step = int(self.period[:-2]) *1.0 / 1000 * self.split
             step = int(step)
         elif self.period[-1] == 's':
-            step = int(self.period[:-1]) * self.split
+            if self.period == '0s':
+                step = 1
+            else:
+                step = int(self.period[:-1]) * self.split
         elif self.period[-1] == 'm':
             step = int(self.period[:-1]) * 60 * self.split
         else:
@@ -45,7 +48,8 @@ class sample(object):
             else:
                 ret = (morning_mid[i] - morning_mid[i-step])/morning_mid[i-step]
                 morning_ret.append(ret)
-        morning_data['rolling_return'] = morning_ret
+
+        morning_data.loc[:,'rolling_return'] = morning_ret
 
         for i in range(afternoon_size):
             if i < step:
@@ -53,7 +57,7 @@ class sample(object):
             else:
                 ret = (afternoon_mid[i] - afternoon_mid[i - step]) / afternoon_mid[i - step]
                 afternoon_ret.append(ret)
-        afternoon_data['rolling_return'] = afternoon_ret
+        afternoon_data.loc[:,'rolling_return'] = afternoon_ret
         res = pd.concat([morning_data,afternoon_data])
         return res
 

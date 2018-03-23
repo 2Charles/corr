@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 class sample(object):
-    def __init__(self, period, target, split = 2):
+    def __init__(self, period, split=2):
         self.period = period
         self.target = target
         self.split = split
